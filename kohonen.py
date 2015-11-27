@@ -2,12 +2,10 @@
 import os
 import numpy as np
 import matplotlib.pyplot as plt
-import matplotlib.gridspec as gridspec
 from mpl_toolkits.axes_grid1 import ImageGrid
 from scipy.spatial.distance import euclidean
-import csv
-import random
 
+DEBUG = True
 
 class Kohonen:
     def __init__(self, data, labels, iterations, size, sigma, eta, variable_sigma=True, log_frec=None, image_frec=None, image_folder="images", sample_size=None):
@@ -23,8 +21,8 @@ class Kohonen:
         self.image_folder = image_folder
         self.sample_size = sample_size if sample_size else None
 
-        self.log_frec = self.iterations / log_frec if log_frec else None
-        self.image_frec = self.iterations / image_frec if image_frec else None
+        self.log_frec = log_frec
+        self.image_frec = image_frec
         
         self.delta_sigma = float(self.sigma - 1) / self.iterations
         self.delta_eta = float(self.eta - 0.01) / self.iterations
@@ -42,7 +40,7 @@ class Kohonen:
             "delta_weights": [],
             "delta_weights_average": [],
             "error": [],
-            "distances": []
+            "distances": [],
         }
 
     @property
@@ -74,9 +72,6 @@ class Kohonen:
         return os.path.join(directory, filename)
 
     def run(self):
-        # print ""
-        # print self.image_path
-        
         self.tmp_sigma = self.sigma
         self.tmp_eta = self.eta
 
@@ -87,22 +82,22 @@ class Kohonen:
         np.random.shuffle(i_random)
 
         for t, i in enumerate(i_random):
-            if (t % (self.iterations / 10) == 0):
-                # print t
-                pass
 
             self.som_step(self.data[i,:])
            
+            if t % 500 == 0:
+                print "Iteration %i" % t
+                self.has_converged()
+
             if (self.log_frec and t % self.log_frec == 0):
+
                 self.quantization_error(self.sample_size)
                 self.classify()
                 self.stats["delta_weights_average"].append(sum(self.stats["delta_weights"][-100:])/min(len(self.stats["delta_weights"]), 100))
 
-                if  (t % self.log_frec * 10) == 0:
-                    self.plot_graph(self.stats['distances'], "distances")
-                    self.plot_graph(self.stats['delta_weights'], "delta_weights")
-                    self.plot_graph(self.stats['delta_weights_average'], "delta_weights_average")
-                    self.plot_graph(self.stats['error'], "error")
+
+                if (DEBUG):
+                    self.plot()
 
             if (self.image_frec and t % self.image_frec == 0):
                 self.plot_image(t)
@@ -114,23 +109,6 @@ class Kohonen:
         self.quantization_error(sample_size=None)
 
     def som_step(self, point):
-        """Performs one step of the sequential learning for a 
-        self-organized map (SOM).
-        
-          centers = som_step(centers,data,neighbor,eta,sigma)
-        
-          Input and output arguments: 
-           centers  (matrix) cluster centres. Have to be in format:
-                             center X dimension
-           data     (vector) the actually presented datapoint to be presented in
-                             this timestep
-           neighbor (matrix) the coordinates of the centers in the desired
-                             neighborhood.
-           eta      (scalar) a learning rate
-           sigma    (scalar) the width of the gaussian neighborhood function.
-                             Effectively describing the width of the neighborhood
-        """
-        
         #find the best matching unit via the minimal distance to the datapoint
         b = np.argmin(np.sum((self.centers - np.resize(point, (self.size_xy, point.size)))**2, 1))
 
@@ -153,17 +131,13 @@ class Kohonen:
 
             self.centers[j,:] += dw
 
-        # print dweights
-        # print np.sum(dweights)
         self.stats["delta_weights"].append(np.sum(dweights))
 
     def plot(self):
-        self.plot_graph(self.stats['distances'], "distances")
-        self.plot_graph(self.stats['delta_weights'], "delta_weights")
-        self.plot_graph(self.stats['delta_weights_average'], "delta_weights_average")
-        self.plot_graph(self.stats['error'], "error")
-        self.plot_image(self.iterations)
-        pass
+        if not self.log_frec:
+            return
+        for key, value in self.stats.iteritems():
+            self.plot_graph(value, key)
 
     def plot_image(self, number=None):
         fig = plt.figure(1, (self.size["x"], self.size["y"]))
@@ -182,36 +156,32 @@ class Kohonen:
         plt.close()
 
     def plot_graph(self, data, name):
+
+        if name == "delta_weights":
+            x = range(len(data))
+        else:
+            x = [self.log_frec * i for i, _ in enumerate(data)]
+
         plt.figure(name)
-        plt.plot(data)
+        plt.plot(x, data)
         savepath = self.get_image_savepath(name, "png")
         plt.savefig(savepath)
         plt.close()
 
-    # def plot_weights(self):
-
     def quantization_error(self, sample_size):
-
         point_distances = []
+
         if sample_size:
             points = np.random.choice(self.data[0].flatten(), sample_size)
         else:
             points = self.data[0]
 
-
         for point in points:
             #find the best matching unit via the minimal distance to the datapoint
             b = np.argmin(np.sum((self.centers - np.resize(point, (self.size_xy, point.size)))**2, 1))
-
-            # print np.average(point_distances)
-            # find coordinates of the winner
-            # a,b = np.nonzero(self.neighbor == b)
-
             point_distances.append(euclidean(self.centers[b], point))
 
         self.stats['distances'].append(np.average(point_distances))
-
-        # dist = np.sqrt((a-a1)**2 + (b-b1)**2)
 
     def classify(self):
 
@@ -227,14 +197,25 @@ class Kohonen:
 
         error_matrix = np.sum(labeled_centers, axis=1) - np.max(labeled_centers, axis=1)
         self.stats['error'].append(np.sum(error_matrix))
-        print self.stats['error'][-1]
-
         
         labeled = np.argmax(labeled_centers, axis=1)
         rows = np.nonzero(((labeled_centers == 0).sum(1) == 10))
         for r in rows:
             labeled[r] = -1
         print labeled.reshape(self.size['x'], self.size["y"])
+
+    def has_converged(self):
+
+        size = len(self.stats['delta_weights'])
+
+        window_size = 1000
+
+        gliding_delta_average = []
+        for i in np.arange(size-window_size, size, 1):
+            gliding_delta_average.append(np.sum(self.stats['delta_weights'][i-window_size:i]))
+
+        print "Variance: %i" % np.std(gliding_delta_average)
+
 
 def get_data(name):
     data = np.array(np.loadtxt('data.txt'))
@@ -244,7 +225,6 @@ def get_data(name):
 
     filtered_data = data[np.logical_or.reduce([labels==x for x in targetdigits]),:]
     
-    # print reduce(lambda x: x if x in targetdigits else None, list(targetdigits))
     filtered_labels = np.array(filter(lambda x: x in targetdigits, labels))
 
     return filtered_data, filtered_labels
@@ -289,64 +269,15 @@ def name2digits(name):
 if __name__ == "__main__":
     data, labels = get_data("AVALOSdiana_HALLENmartin")
 
-    # sigma = 4
-    # size = 8
-    # eta = 0.02
-    # iterations = 5000
+    iterations = 100000
+    size = 6
+    sigma = 1.5
+    eta = 0.01
+    image_frec = 1000
 
-    # kohonen = Kohonen(data, labels, iterations, {"x": size, "y": size}, sigma, eta, variable_sigma=False, image_frec=100, image_folder="fixed-sigma", log_frec=100)
+    kohonen = Kohonen(data, labels, iterations, {"x": size, "y": size}, sigma, eta, variable_sigma=False, image_folder="test", sample_size=100, image_frec=image_frec)
 
-    # writer.writerow(("sigma", "eta", "size", "result"))
-
-    count = 1
-    iterations = 30000
-
-    for i in range(count):
-        
-        # print "%i/%i " % (i, count)
-        # eta = random.random() / 10
-        # sigma = random.randint(2, 14)
-        # size = random.randint(14, 16)
-        sigma = 1
-        size = 8
-        eta = 0.01
-        kohonen = Kohonen(data, labels, iterations, {"x": size, "y": size}, sigma, eta, image_folder="classify", log_frec=10, variable_sigma=False)
-        kohonen.run()
-        kohonen.classify()
-        kohonen.plot()
-        result = kohonen.stats['distances'][-1]
-
-        # print (sigma, eta, size, result)
-
-        # f = open("data-fixed-sigma.csv" % iterations, "a")
-        # writer = csv.writer(f)
-        # writer.writerow((sigma, eta, size, result))
-        # f.close()
-
-
-    # sigmas = np.linspace(1, 10, 10)
-    # etas = np.linspace(0.01, 0.1, 10)
-    # # sizes = np.linspace(2, 10, 4)
-
-    # print len(sigmas) * len(etas)
-
-    # x = []
-    # y = []
-    # area = []
-
-    # for sigma in sigmas:
-    #     for eta in etas:
-    #         # for size in sizes:
-    #         kohonen = Kohonen(data, 500, {"x": 8, "y": 8}, sigma, eta)
-    #         kohonen.run()
-    #         result = kohonen.stats['distances'][-1]
-    #         x.append(sigma)
-    #         y.append(result)
-    #         area.append(np.pi * (100*eta)**2)
-    #     # kohonen.plot()
-
-    # plt.figure("newfig")
-    # plt.scatter(x, y, s=area, alpha=0.5)
-
-    # plt.savefig("scatter.png")
-    # plt.close()
+    kohonen.run()
+    kohonen.classify()
+    kohonen.plot()
+    kohonen.plot_image()
