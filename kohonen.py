@@ -41,6 +41,7 @@ class Kohonen:
             "delta_weights_average": [],
             "error": [],
             "distances": [],
+            "std": [],
         }
 
     @property
@@ -85,15 +86,15 @@ class Kohonen:
 
             self.som_step(self.data[i,:])
            
-            if t % 500 == 0:
+            if t % 1000 == 0:
                 print "Iteration %i" % t
-                self.has_converged()
 
             if (self.log_frec and t % self.log_frec == 0):
 
                 self.quantization_error(self.sample_size)
                 self.classify()
                 self.stats["delta_weights_average"].append(sum(self.stats["delta_weights"][-100:])/min(len(self.stats["delta_weights"]), 100))
+                self.has_converged()
 
 
                 if (DEBUG):
@@ -172,9 +173,9 @@ class Kohonen:
         point_distances = []
 
         if sample_size:
-            points = np.random.choice(self.data[0].flatten(), sample_size)
+            points = np.random.choice(self.data.flatten(), sample_size)
         else:
-            points = self.data[0]
+            points = self.data
 
         for point in points:
             #find the best matching unit via the minimal distance to the datapoint
@@ -202,19 +203,17 @@ class Kohonen:
         rows = np.nonzero(((labeled_centers == 0).sum(1) == 10))
         for r in rows:
             labeled[r] = -1
-        print labeled.reshape(self.size['x'], self.size["y"])
+        # print labeled.reshape(self.size['x'], self.size["y"])
 
     def has_converged(self):
+        if len(self.stats['distances']) < 1:
+            return False
+        std = np.std(self.stats['distances'][-5:])
+        print "Standard deviation(distance): %.2f" % std
 
-        size = len(self.stats['delta_weights'])
-
-        window_size = 1000
-
-        gliding_delta_average = []
-        for i in np.arange(size-window_size, size, 1):
-            gliding_delta_average.append(np.sum(self.stats['delta_weights'][i-window_size:i]))
-
-        print "Variance: %i" % np.std(gliding_delta_average)
+        if std < 5:
+            print "Kohonen map has converged"
+            exit()
 
 
 def get_data(name):
@@ -269,13 +268,14 @@ def name2digits(name):
 if __name__ == "__main__":
     data, labels = get_data("AVALOSdiana_HALLENmartin")
 
-    iterations = 100000
+    iterations = 40000
     size = 6
-    sigma = 1.5
-    eta = 0.01
-    image_frec = 1000
+    sigma = 1
+    eta = 0.008
+    image_frec = 2000
+    log_frec = 2000
 
-    kohonen = Kohonen(data, labels, iterations, {"x": size, "y": size}, sigma, eta, variable_sigma=False, image_folder="test", sample_size=100, image_frec=image_frec)
+    kohonen = Kohonen(data, labels, iterations, {"x": size, "y": size}, sigma, eta, variable_sigma=False, log_frec=log_frec, image_folder="test", image_frec=image_frec)
 
     kohonen.run()
     kohonen.classify()
